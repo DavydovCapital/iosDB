@@ -1,0 +1,87 @@
+name: Unity iOS IPA (unsigned)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CobraStrike3D/**'
+      - '.github/workflows/unity-ios.yml'
+  workflow_dispatch:
+
+jobs:
+  unity-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/cache@v4
+        with:
+          path: CobraStrike3D/Library
+          key: unity-library-${{ hashFiles('CobraStrike3D/Packages/manifest.json') }}
+          restore-keys: unity-library-
+
+      - name: Build Unity iOS Xcode project
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: CobraStrike3D
+          unityVersion: 6000.5.9f1
+          targetPlatform: iOS
+          buildMethod: GameBuilder.BuildiOS
+          buildsPath: Builds
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CobraStrike3D-xcode-project
+          path: Builds/iOS
+          compression-level: 0
+
+  xcode-ipa:
+    needs: unity-build
+    runs-on: macos-14
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CobraStrike3D-xcode-project
+          path: iOSBuild
+
+      - name: Locate Unity-iPhone project
+        id: proj
+        run: |
+          if [ -d "iOSBuild/Unity-iPhone.xcodeproj" ]; then
+            echo "dir=iOSBuild" >> "$GITHUB_OUTPUT"
+          else
+            SUB=$(find iOSBuild -maxdepth 2 -name "Unity-iPhone.xcodeproj" | head -1 | xargs dirname)
+            echo "dir=$SUB" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Archive (no code signing)
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          xcodebuild \
+            -project Unity-iPhone.xcodeproj \
+            -scheme Unity-iPhone \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/CobraStrike3D.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R "$RUNNER_TEMP/CobraStrike3D.xcarchive/Products/Applications/"*.app Payload/
+          zip -r -q CobraStrike3D-unsigned.ipa Payload
+          ls -lh CobraStrike3D-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CobraStrike3D-unsigned-ipa
+          path: CobraStrike3D-unsigned.ipa
