@@ -1,11 +1,6 @@
 name: Unity iOS IPA (unsigned)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'CobraStrike3D/**'
-      - '.github/workflows/unity-ios.yml'
   workflow_dispatch:
 
 jobs:

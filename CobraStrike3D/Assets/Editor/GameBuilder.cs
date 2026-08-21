@@ -1,4 +1,5 @@
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -22,9 +23,17 @@ public static class GameBuilder
     [MenuItem("Cobra/Build iOS")]
     public static void BuildiOS()
     {
-        PlayerSettings.productName = "Cobra Strike 3D";
+        PlayerSettings.productName = "Cobra Strike";
         PlayerSettings.companyName = "DavydovCapital";
-        PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.iOS, "com.davydovcapital.cobrastrike3d");
+        PlayerSettings.bundleVersion = "1.0";
+        PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.iOS, "com.davydovcapital.cobrastrike3d");
+        PlayerSettings.SetArchitecture(NamedBuildTarget.iOS, 1);
+        PlayerSettings.iOS.targetOSVersionString = "13.0";
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+        PlayerSettings.allowedAutorotateToPortrait = false;
+        PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+        PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+        PlayerSettings.allowedAutorotateToLandscapeRight = true;
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
             scenes = new[] { "Assets/Scenes/Main.unity" },

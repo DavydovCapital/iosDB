@@ -4,6 +4,7 @@ using UnityEngine.UI;
 public class HUD : MonoBehaviour
 {
     public static HUD Instance;
+    public static bool Paused = true;
 
     public Text missionText;
     public Text killsText;

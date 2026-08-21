@@ -1,7 +1,12 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.SceneManagement;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem.UI;
+#endif
 
 public static class SceneBuilder
 {
@@ -9,57 +14,32 @@ public static class SceneBuilder
     public static void Build()
     {
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        if (!AssetDatabase.IsValidFolder("Assets/Scenes")) AssetDatabase.CreateFolder("Assets", "Scenes");
+        if (!AssetDatabase.IsValidFolder("Assets/Prefabs")) AssetDatabase.CreateFolder("Assets", "Prefabs");
 
-        // Lighting
+        PlayerSettings.companyName = "DavydovCapital";
+        PlayerSettings.productName = "Cobra Strike";
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+        PlayerSettings.allowedAutorotateToPortrait = false;
+        PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+        PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+        PlayerSettings.allowedAutorotateToLandscapeRight = true;
+        PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.iOS, "com.davydovcapital.cobrastrike3d");
+
         var sunGO = new GameObject("Sun");
         var sun = sunGO.AddComponent<Light>();
         sun.type = LightType.Directional;
-        sun.intensity = 1.3f;
+        sun.intensity = 1.35f;
         sun.shadows = LightShadows.Soft;
-        sunGO.transform.rotation = Quaternion.Euler(50, -30, 0);
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = new Color(0.35f, 0.42f, 0.5f);
-        RenderSettings.fog = true;
-        RenderSettings.fogColor = new Color(0.12f, 0.14f, 0.18f);
-        RenderSettings.fogMode = FogMode.Exponential;
-        RenderSettings.fogDensity = 0.015f;
+        sun.color = new Color(1f, 0.86f, 0.62f);
+        sunGO.transform.rotation = Quaternion.Euler(42, -35, 0);
 
-        // Ground
-        var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        ground.name = "Ground";
-        ground.transform.localScale = new Vector3(20, 1, 20);
-        ground.GetComponent<Renderer>().sharedMaterial = MakeMat(new Color(0.16f, 0.17f, 0.19f));
-
-        // Arena cover
-        var coverMat = MakeMat(new Color(0.28f, 0.3f, 0.34f));
-        for (int i = 0; i < 24; i++)
-        {
-            var c = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            c.name = "Cover" + i;
-            c.transform.position = new Vector3(Random.Range(-35f, 35f), 0.6f, Random.Range(-45f, 15f));
-            c.transform.localScale = new Vector3(Random.Range(1.5f, 4f), Random.Range(1f, 2.2f), Random.Range(0.6f, 1.2f));
-            c.transform.rotation = Quaternion.Euler(0, Random.Range(0, 360), 0);
-            c.GetComponent<Renderer>().sharedMaterial = coverMat;
-        }
-
-        // Buildings
-        var buildingMat = MakeMat(new Color(0.2f, 0.23f, 0.28f));
-        for (int i = 0; i < 10; i++)
-        {
-            var b = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            b.name = "Building" + i;
-            float h = Random.Range(6f, 18f);
-            b.transform.position = new Vector3((i % 2 == 0 ? 1 : -1) * Random.Range(30f, 60f), h / 2, Random.Range(-80f, 10f));
-            b.transform.localScale = new Vector3(Random.Range(6f, 12f), h, Random.Range(6f, 12f));
-            b.GetComponent<Renderer>().sharedMaterial = buildingMat;
-        }
-
-        // Player
         var player = new GameObject("Player");
         player.tag = "Player";
-        player.transform.position = new Vector3(0, 1.1f, 12);
+        player.transform.position = new Vector3(0, 0.1f, 10);
         var cc = player.AddComponent<CharacterController>();
         cc.height = 1.8f;
+        cc.radius = 0.35f;
         cc.center = new Vector3(0, 0.9f, 0);
         player.AddComponent<PlayerHealth>();
         var fps = player.AddComponent<FPSController>();
@@ -67,113 +47,129 @@ public static class SceneBuilder
         var camGO = new GameObject("Main Camera");
         camGO.tag = "MainCamera";
         var cam = camGO.AddComponent<Camera>();
-        cam.fieldOfView = 68f;
+        cam.fieldOfView = 70f;
+        cam.nearClipPlane = 0.05f;
+        cam.farClipPlane = 220f;
+        cam.allowHDR = true;
         camGO.AddComponent<AudioListener>();
         camGO.transform.SetParent(player.transform);
         camGO.transform.localPosition = new Vector3(0, 1.62f, 0);
         fps.cameraRoot = camGO.transform;
 
-        // Gun model
-        var gun = new GameObject("Gun");
-        gun.transform.SetParent(camGO.transform);
-        gun.transform.localPosition = new Vector3(0.35f, -0.28f, 0.55f);
-        var receiver = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        receiver.transform.SetParent(gun.transform);
-        receiver.transform.localPosition = Vector3.zero;
-        receiver.transform.localScale = new Vector3(0.16f, 0.12f, 0.5f);
-        receiver.GetComponent<Renderer>().sharedMaterial = MakeMat(new Color(0.08f, 0.09f, 0.11f));
-        var barrel = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        barrel.transform.SetParent(gun.transform);
-        barrel.transform.localPosition = new Vector3(0, 0.02f, -0.35f);
-        barrel.transform.localRotation = Quaternion.Euler(90, 0, 0);
-        barrel.transform.localScale = new Vector3(0.035f, 0.25f, 0.035f);
-        barrel.GetComponent<Renderer>().sharedMaterial = MakeMat(new Color(0.05f, 0.05f, 0.06f));
+        var gun = BuildGun(camGO.transform);
         var weapon = player.AddComponent<Weapon>();
         weapon.cam = cam;
-        weapon.gunModel = gun.transform;
+        weapon.gunModel = gun;
 
-        // Enemy prefabs (created as prefab assets)
-        var gruntPrefab = MakeEnemyPrefab("Grunt", new Color(0.25f, 0.35f, 0.2f), 2.2f);
-        var heavyPrefab = MakeEnemyPrefab("Heavy", new Color(0.4f, 0.15f, 0.15f), 1.6f, true);
+        var gruntPrefab = MakeEnemyPrefab("Grunt", false);
+        var heavyPrefab = MakeEnemyPrefab("Heavy", true);
 
-        // Spawn points
-        var spRoot = new GameObject("SpawnPoints");
-        var sps = new Transform[6];
-        for (int i = 0; i < 6; i++)
-        {
-            var sp = new GameObject("SP" + i);
-            sp.transform.SetParent(spRoot.transform);
-            sp.transform.position = new Vector3(-30 + i * 12, 0, -40 - (i % 3) * 15);
-            sps[i] = sp.transform;
-        }
-
-        // GameManager
         var gmGO = new GameObject("GameManager");
         var gm = gmGO.AddComponent<GameManager>();
         gm.gruntPrefab = gruntPrefab;
         gm.heavyPrefab = heavyPrefab;
-        gm.spawnPoints = sps;
 
-        // HUD canvas
+        new GameObject("ArenaDirector").AddComponent<ArenaDirector>();
+        new GameObject("CombatInput").AddComponent<CombatInput>();
+        new GameObject("GameAudio").AddComponent<GameAudio>();
+
+        var es = new GameObject("EventSystem");
+        es.AddComponent<EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+        es.AddComponent<InputSystemUIInputModule>();
+#else
+        es.AddComponent<StandaloneInputModule>();
+#endif
+
         var canvasGO = new GameObject("HUD");
         var canvas = canvasGO.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvasGO.AddComponent<CanvasScaler>();
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
         canvasGO.AddComponent<GraphicRaycaster>();
         var hud = canvasGO.AddComponent<HUD>();
+        canvasGO.AddComponent<MobileHud>();
 
-        hud.missionText = MakeText(canvasGO.transform, "MissionText", "BLACKSITE DAWN", 16, TextAnchor.UpperLeft, new Vector2(20, -20), new Vector2(0, 1), new Vector2(0, 1));
-        hud.killsText = MakeText(canvasGO.transform, "KillsText", "KILLS 0/8", 14, TextAnchor.UpperCenter, new Vector2(0, -20), new Vector2(0.5f, 1), new Vector2(0.5f, 1));
-        hud.healthText = MakeText(canvasGO.transform, "HealthText", "HP 100", 14, TextAnchor.UpperRight, new Vector2(-20, -20), new Vector2(1, 1), new Vector2(1, 1));
-        hud.ammoText = MakeText(canvasGO.transform, "AmmoText", "AMMO 30/30", 14, TextAnchor.LowerRight, new Vector2(-20, 20), new Vector2(1, 0), new Vector2(1, 0));
-        hud.scoreText = MakeText(canvasGO.transform, "ScoreText", "000000", 14, TextAnchor.LowerLeft, new Vector2(20, 20), new Vector2(0, 0), new Vector2(0, 0));
-
-        MakeText(canvasGO.transform, "Crosshair", "+", 22, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-        var hitText = MakeText(canvasGO.transform, "HitMarker", "✕", 26, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        hud.missionText = MakeText(canvasGO.transform, "MissionText", "BLACKSITE DAWN", 18, TextAnchor.UpperLeft, new Vector2(24, -18), new Vector2(0, 1), new Vector2(0, 1));
+        hud.killsText = MakeText(canvasGO.transform, "KillsText", "KILLS 0/10", 16, TextAnchor.UpperCenter, new Vector2(0, -18), new Vector2(0.5f, 1), new Vector2(0.5f, 1));
+        hud.healthText = MakeText(canvasGO.transform, "HealthText", "HP 100", 16, TextAnchor.UpperRight, new Vector2(-24, -18), new Vector2(1, 1), new Vector2(1, 1));
+        hud.ammoText = MakeText(canvasGO.transform, "AmmoText", "AMMO 30/30", 16, TextAnchor.LowerCenter, new Vector2(0, 24), new Vector2(0.5f, 0), new Vector2(0.5f, 0));
+        hud.scoreText = MakeText(canvasGO.transform, "ScoreText", "000000", 16, TextAnchor.LowerLeft, new Vector2(24, 24), new Vector2(0, 0), new Vector2(0, 0));
+        MakeText(canvasGO.transform, "Crosshair", "+", 28, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        var hitText = MakeText(canvasGO.transform, "HitMarker", "✕", 30, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
         hud.hitMarker = hitText;
-        hitText.color = new Color(1f, 0.9f, 0.4f, 1f);
+        hitText.color = new Color(1f, 0.9f, 0.35f, 1f);
         hitText.enabled = false;
 
-        // Briefing panel
         var brief = MakePanel(canvasGO.transform, "BriefingPanel");
         hud.briefingPanel = brief;
-        hud.briefingTitle = MakeText(brief.transform, "Title", "BLACKSITE DAWN", 26, TextAnchor.MiddleCenter, new Vector2(0, 60), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-        hud.briefingObjective = MakeText(brief.transform, "Objective", "Breach the outer yard", 14, TextAnchor.MiddleCenter, new Vector2(0, 10), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-        hud.deployButton = MakeButton(brief.transform, "DeployButton", "DEPLOY", new Vector2(0, -60));
+        hud.briefingTitle = MakeText(brief.transform, "Title", "BLACKSITE DAWN", 28, TextAnchor.MiddleCenter, new Vector2(0, 70), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        hud.briefingObjective = MakeText(brief.transform, "Objective", "Breach the outer yard", 16, TextAnchor.MiddleCenter, new Vector2(0, 16), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        hud.deployButton = MakeButton(brief.transform, "DeployButton", "DEPLOY", new Vector2(0, -70));
 
-        // Result panel
         var result = MakePanel(canvasGO.transform, "ResultPanel");
         hud.resultPanel = result;
-        hud.resultTitle = MakeText(result.transform, "Title", "MISSION CLEAR", 26, TextAnchor.MiddleCenter, new Vector2(0, 60), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-        hud.resultScore = MakeText(result.transform, "Score", "000000", 18, TextAnchor.MiddleCenter, new Vector2(0, 10), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        hud.resultTitle = MakeText(result.transform, "Title", "MISSION CLEAR", 28, TextAnchor.MiddleCenter, new Vector2(0, 70), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+        hud.resultScore = MakeText(result.transform, "Score", "000000", 20, TextAnchor.MiddleCenter, new Vector2(0, 16), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
         hud.nextButton = MakeButton(result.transform, "NextButton", "NEXT MISSION", new Vector2(0, -60));
         hud.restartButton = MakeButton(result.transform, "RestartButton", "RESTART", new Vector2(0, -120));
         result.SetActive(false);
 
         EditorSceneManager.SaveScene(scene, "Assets/Scenes/Main.unity");
         EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene("Assets/Scenes/Main.unity", true) };
-        Debug.Log("Cobra Strike 3D scene built successfully.");
+        AssetDatabase.SaveAssets();
+        Debug.Log("Cobra Strike 3D scene built.");
+    }
+
+    [MenuItem("Cobra/Build Scene And iOS")]
+    public static void BuildSceneAndiOS()
+    {
+        Build();
+        GameBuilder.BuildiOS();
+    }
+
+    static Transform BuildGun(Transform cam)
+    {
+        var gun = new GameObject("Gun").transform;
+        gun.SetParent(cam);
+        gun.localPosition = new Vector3(0.32f, -0.26f, 0.52f);
+        gun.localRotation = Quaternion.identity;
+        void Part(PrimitiveType type, Vector3 pos, Vector3 scale, Quaternion rot, Color col, float metal, float gloss)
+        {
+            var p = GameObject.CreatePrimitive(type);
+            p.transform.SetParent(gun);
+            p.transform.localPosition = pos;
+            p.transform.localRotation = rot;
+            p.transform.localScale = scale;
+            var m = new Material(Shader.Find("Standard"));
+            m.color = col;
+            m.SetFloat("_Metallic", metal);
+            m.SetFloat("_Glossiness", gloss);
+            p.GetComponent<Renderer>().sharedMaterial = m;
+            Object.DestroyImmediate(p.GetComponent<Collider>());
+        }
+        Part(PrimitiveType.Cube, Vector3.zero, new Vector3(0.18f, 0.14f, 0.55f), Quaternion.identity, new Color(0.07f, 0.08f, 0.09f), 0.85f, 0.55f);
+        Part(PrimitiveType.Cylinder, new Vector3(0f, 0.02f, -0.42f), new Vector3(0.04f, 0.28f, 0.04f), Quaternion.Euler(90, 0, 0), new Color(0.04f, 0.04f, 0.05f), 0.9f, 0.7f);
+        Part(PrimitiveType.Cube, new Vector3(0f, -0.16f, 0.08f), new Vector3(0.08f, 0.22f, 0.14f), Quaternion.identity, new Color(0.08f, 0.08f, 0.08f), 0.4f, 0.25f);
+        Part(PrimitiveType.Cube, new Vector3(0f, 0.1f, 0.05f), new Vector3(0.04f, 0.08f, 0.16f), Quaternion.identity, new Color(0.15f, 0.8f, 1f), 0.2f, 0.8f);
+        return gun;
     }
 
     static Material MakeMat(Color c)
     {
-        var m = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
+        var m = new Material(Shader.Find("Standard"));
         m.color = c;
+        m.SetFloat("_Metallic", 0.3f);
+        m.SetFloat("_Glossiness", 0.4f);
         return m;
     }
 
-    static GameObject MakeEnemyPrefab(string name, Color color, float speed, bool heavy = false)
+    static GameObject MakeEnemyPrefab(string name, bool heavy)
     {
-        var root = new GameObject(name);
-        var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        body.transform.SetParent(root.transform);
-        body.transform.localPosition = new Vector3(0, 1f, 0);
-        body.GetComponent<Renderer>().sharedMaterial = MakeMat(color);
-        var e = root.AddComponent<Enemy>();
-        e.moveSpeed = speed;
-        e.hp = heavy ? 160f : 100f;
-        e.damage = heavy ? 16 : 12;
-        string path = $"Assets/{name}.prefab";
+        var root = EnemyFactory.Create(heavy);
+        root.name = name;
+        string path = $"Assets/Prefabs/{name}.prefab";
         var prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
         Object.DestroyImmediate(root);
         return prefab;
@@ -189,6 +185,7 @@ public static class SceneBuilder
         t.alignment = anchor;
         t.color = Color.white;
         t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.raycastTarget = false;
         var rt = t.GetComponent<RectTransform>();
         rt.anchorMin = min; rt.anchorMax = max;
         rt.anchoredPosition = pos;

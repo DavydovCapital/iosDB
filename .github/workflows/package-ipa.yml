@@ -1,0 +1,44 @@
+name: Package unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "CobraStrike3D/Builds/iOS/**"
+      - ".github/workflows/package-ipa.yml"
+      - ".github/workflows/unity-ios.yml"
+
+jobs:
+  ipa:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP_DIR="CobraStrike3D/Builds/iOS"
+          if [ ! -f "$APP_DIR/Unity-iPhone.xcodeproj/project.pbxproj" ]; then
+            echo "No Unity iOS export at $APP_DIR"
+            exit 1
+          fi
+          cd "$APP_DIR"
+          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            -derivedDataPath derived \
+            build
+          APP=$(find derived -name "*.app" | head -n 1)
+          echo "APP=$APP"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qr Cobra-Strike-unsigned.ipa Payload
+          ls -lh Cobra-Strike-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cobra-Strike-unsigned-ipa
+          path: CobraStrike3D/Builds/iOS/Cobra-Strike-unsigned.ipa
