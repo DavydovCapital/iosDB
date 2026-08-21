@@ -23,10 +23,21 @@ jobs:
           key: unity-library-${{ hashFiles('CobraStrike3D/Packages/manifest.json') }}
           restore-keys: unity-library-
 
+      - name: Activate Unity License
+        uses: game-ci/unity-activate@v2
+        with:
+          unityVersion: 6000.5.9f1
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
       - name: Build Unity iOS Xcode project
         uses: game-ci/unity-builder@v4
+        with:
+          unityVersion: 6000.5.9f1
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: CobraStrike3D
           unityVersion: 6000.5.9f1
