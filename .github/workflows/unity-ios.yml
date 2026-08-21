@@ -34,16 +34,14 @@ jobs:
       - name: Build Unity iOS Xcode project
         uses: game-ci/unity-builder@v4
         with:
-          unityVersion: 6000.5.9f1
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
           projectPath: CobraStrike3D
           unityVersion: 6000.5.9f1
           targetPlatform: iOS
           buildMethod: GameBuilder.BuildiOS
           buildsPath: Builds
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
       - uses: actions/upload-artifact@v4
         with:
