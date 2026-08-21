@@ -1,399 +1,339 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import * as THREE from "three";
 
-type EnemyKind = "scout" | "heavy" | "turret" | "boss";
-type Enemy = { id: number; x: number; y: number; hp: number; maxHp: number; speed: number; shot: number; kind: EnemyKind; hit: number; phase: number };
-type Shot = { x: number; y: number; vx: number; vy: number; hostile: boolean; spread: number };
-type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number };
-type GameState = "briefing" | "playing" | "levelclear" | "won" | "lost";
-type Level = {
-  name: string; subtitle: string; kills: number; goal: number; maxEnemies: number; spawn: number;
-  sky: [string, string, string]; sun: string; far: string; near: string; ground: string; accent: string;
-  heavy: number; turrets: number; boss: boolean; speed: number;
-};
-type Game = {
-  player: { x: number; y: number; vy: number; lives: number; cooldown: number; invincible: number; facing: 1 | -1 };
-  enemies: Enemy[]; shots: Shot[]; particles: Particle[];
-  score: number; kills: number; level: number; spawn: number; nextId: number; shake: number; state: GameState; time: number;
-};
+type Mission = { name: string; objective: string; enemies: number; fog: number; sky: number; ground: number; accent: number; speed: number };
+type Hud = { state: "briefing" | "playing" | "clear" | "won" | "lost"; mission: number; kills: number; health: number; score: number; fps: number };
+type Enemy = { mesh: THREE.Group; hp: number; speed: number; cooldown: number; kind: "grunt" | "heavy" | "drone" };
+type Bolt = { mesh: THREE.Mesh; velocity: THREE.Vector3; hostile: boolean; life: number };
 
-const W = 844;
-const H = 390;
-const FLOOR = 310;
-const TOTAL_LEVELS = 5;
-const LEVELS: Level[] = [
-  { name: "SUNSET OUTPOST", subtitle: "Break the siege", kills: 10, goal: 10, maxEnemies: 4, spawn: .78, sky: ["#150b2e", "#7c2d91", "#ff7a45"], sun: "#ffd166", far: "#3f2a6d", near: "#271944", ground: "#241433", accent: "#ff9f4a", heavy: 0, turrets: 0, boss: false, speed: 1 },
-  { name: "NEON HARBOR", subtitle: "Hold the docks", kills: 14, goal: 14, maxEnemies: 5, spawn: .68, sky: ["#031d35", "#006d77", "#ff4d8d"], sun: "#7bf1a8", far: "#16456b", near: "#0b2d47", ground: "#101826", accent: "#5ee1ff", heavy: .18, turrets: 0, boss: false, speed: 1.08 },
-  { name: "VIOLET RIDGE", subtitle: "Cross the ridge", kills: 16, goal: 16, maxEnemies: 5, spawn: .62, sky: ["#12031f", "#4c1d95", "#f72585"], sun: "#ffca3a", far: "#3b2f77", near: "#211946", ground: "#1a1330", accent: "#c77dff", heavy: .24, turrets: .1, boss: false, speed: 1.16 },
-  { name: "GRID CITY", subtitle: "Clear the streets", kills: 18, goal: 18, maxEnemies: 6, spawn: .56, sky: ["#020617", "#0f766e", "#f97316"], sun: "#f8f7a1", far: "#155e75", near: "#0f3b4c", ground: "#111827", accent: "#22d3ee", heavy: .3, turrets: .18, boss: false, speed: 1.24 },
-  { name: "COMMAND CORE", subtitle: "Destroy the core", kills: 21, goal: 21, maxEnemies: 6, spawn: .5, sky: ["#18020d", "#7f1d1d", "#f43f5e"], sun: "#fff1a8", far: "#4a1d2f", near: "#2d1224", ground: "#17121c", accent: "#fb7185", heavy: .34, turrets: .22, boss: true, speed: 1.34 },
+const MISSIONS: Mission[] = [
+  { name: "SUNSET OUTPOST", objective: "Eliminate patrol squad", enemies: 8, fog: 0x2a1740, sky: 0xff7a45, ground: 0x241433, accent: 0xffd166, speed: 1 },
+  { name: "NEON HARBOR", objective: "Push through dock defenses", enemies: 11, fog: 0x08243a, sky: 0x00c2ff, ground: 0x101826, accent: 0x5ee1ff, speed: 1.08 },
+  { name: "VIOLET RIDGE", objective: "Clear ridge positions", enemies: 14, fog: 0x1d1038, sky: 0xc77dff, ground: 0x1a1330, accent: 0xf72585, speed: 1.16 },
+  { name: "GRID CITY", objective: "Sweep urban blocks", enemies: 17, fog: 0x061522, sky: 0x22d3ee, ground: 0x111827, accent: 0xff8fab, speed: 1.24 },
+  { name: "COMMAND CORE", objective: "Destroy final assault group", enemies: 20, fog: 0x210712, sky: 0xfb7185, ground: 0x17121c, accent: 0xfff1a8, speed: 1.34 },
 ];
 
-const newGame = (level = 1, score = 0, lives = 3): Game => ({
-  player: { x: 118, y: FLOOR, vy: 0, lives, cooldown: 0, invincible: 1.2, facing: 1 },
-  enemies: [], shots: [], particles: [], score, kills: 0, level, spawn: .7, nextId: 1, shake: 0, state: "briefing", time: 0,
-});
-
-class Synthwave {
+class Synth {
   private ctx?: AudioContext;
   private master?: GainNode;
   private timer?: number;
   private step = 0;
-  enabled = true;
-
   start() {
-    if (this.timer || !this.enabled) return;
-    const AudioCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtor) return;
-    this.ctx = this.ctx ?? new AudioCtor();
+    if (this.timer) return;
+    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    this.ctx = this.ctx ?? new Ctor();
     this.master = this.ctx.createGain();
-    this.master.gain.value = .16;
+    this.master.gain.value = .13;
     this.master.connect(this.ctx.destination);
     void this.ctx.resume();
-    this.step = 0;
-    this.timer = window.setInterval(() => this.tick(), 120);
+    this.timer = window.setInterval(() => this.tick(), 128);
   }
-
-  stop() {
-    if (this.timer) window.clearInterval(this.timer);
-    this.timer = undefined;
-  }
-
-  toggle() {
-    this.enabled = !this.enabled;
-    if (!this.enabled) this.stop(); else this.start();
-  }
-
-  private tone(freq: number, dur: number, type: OscillatorType, gain: number, when = 0) {
+  stop() { if (this.timer) window.clearInterval(this.timer); this.timer = undefined; }
+  private tone(freq: number, dur: number, type: OscillatorType, gain: number) {
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime + when;
+    const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const amp = this.ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, t);
-    amp.gain.setValueAtTime(0.0001, t);
+    osc.type = type; osc.frequency.setValueAtTime(freq, t);
+    amp.gain.setValueAtTime(.0001, t);
     amp.gain.exponentialRampToValueAtTime(gain, t + .01);
-    amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(amp).connect(this.master);
-    osc.start(t); osc.stop(t + dur + .03);
+    amp.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    osc.connect(amp).connect(this.master); osc.start(t); osc.stop(t + dur + .02);
   }
-
   private tick() {
-    const bass = [55, 55, 65.4, 55, 73.4, 55, 49, 61.7];
-    const lead = [220, 261.6, 329.6, 392, 329.6, 440, 392, 329.6, 261.6, 329.6, 392, 523.2, 392, 329.6, 293.7, 261.6];
+    const bass = [55, 55, 65.41, 55, 73.42, 55, 49, 61.74];
+    const lead = [220, 261.63, 329.63, 392, 329.63, 440, 392, 329.63, 261.63, 329.63, 392, 523.25, 392, 329.63, 293.66, 261.63];
     const s = this.step++;
-    this.tone(bass[s % bass.length], .12, "sawtooth", .12);
-    if (s % 2 === 0) this.tone(lead[(s / 2) % lead.length], .09, "square", .055);
-    if (s % 4 === 0) this.tone(140, .03, "triangle", .08);
-    if (s % 8 === 4) this.tone(1900, .02, "sawtooth", .025);
+    this.tone(bass[s % bass.length], .11, "sawtooth", .1);
+    if (s % 2 === 0) this.tone(lead[(s / 2) % lead.length], .08, "square", .045);
+    if (s % 4 === 0) this.tone(1800, .02, "sawtooth", .02);
   }
 }
 
 function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameRef = useRef<Game>(newGame());
-  const held = useRef(new Set<string>());
-  const musicRef = useRef(new Synthwave());
-  const [hud, setHud] = useState({ lives: 3, score: 0, kills: 0, level: 1, state: "briefing" as GameState });
+  const mountRef = useRef<HTMLDivElement>(null);
+  const hudRef = useRef<Hud>({ state: "briefing", mission: 1, kills: 0, health: 100, score: 0, fps: 60 });
+  const [hud, setHud] = useState<Hud>(hudRef.current);
+  const input = useRef({ forward: 0, strafe: 0, firing: false, lookX: 0, lookY: 0 });
+  const music = useRef(new Synth());
 
-  const publish = useCallback(() => {
-    const g = gameRef.current;
-    setHud({ lives: g.player.lives, score: g.score, kills: g.kills, level: g.level, state: g.state });
+  const setState = useCallback((patch: Partial<Hud>) => {
+    hudRef.current = { ...hudRef.current, ...patch };
+    setHud(hudRef.current);
   }, []);
 
-  const start = useCallback(() => {
-    gameRef.current.state = "playing";
-    musicRef.current.start();
-    publish();
-  }, [publish]);
-
-  const next = useCallback(() => {
-    const g = gameRef.current;
-    if (g.level >= TOTAL_LEVELS) { g.state = "won"; publish(); return; }
-    gameRef.current = newGame(g.level + 1, g.score + 1000, Math.min(4, g.player.lives + 1));
-    gameRef.current.state = "playing";
-    publish();
-  }, [publish]);
-
-  const reset = useCallback(() => {
-    gameRef.current = newGame();
-    held.current.clear();
-    publish();
-  }, [publish]);
-
-  const press = (control: string) => (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    held.current.add(control);
-  };
-  const release = (control: string) => () => held.current.delete(control);
-
   useEffect(() => {
-    const down = (event: KeyboardEvent) => {
-      const key = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "jump", KeyA: "left", KeyD: "right", KeyW: "jump", Space: "fire" } as Record<string, string>)[event.code];
-      if (key) { event.preventDefault(); held.current.add(key); }
-      if (event.code === "Enter" && gameRef.current.state === "briefing") start();
-      if (event.code === "KeyM") musicRef.current.toggle();
-    };
-    const up = (event: KeyboardEvent) => {
-      const key = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "jump", KeyA: "left", KeyD: "right", KeyW: "jump", Space: "fire" } as Record<string, string>)[event.code];
-      if (key) held.current.delete(key);
-    };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [start]);
+    const mount = mountRef.current!;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, .1, 500);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    mount.appendChild(renderer.domElement);
 
-  useEffect(() => {
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
-    let animation = 0;
-    let last = performance.now();
-    let hudClock = 0;
+    const clock = new THREE.Clock();
+    const ray = new THREE.Raycaster();
+    const center = new THREE.Vector2(0, 0);
+    const world = new THREE.Group(); scene.add(world);
+    const enemies: Enemy[] = [];
+    const bolts: Bolt[] = [];
+    const particles: { mesh: THREE.Mesh; velocity: THREE.Vector3; life: number }[] = [];
 
-    const burst = (g: Game, x: number, y: number, color: string, count = 12) => {
-      for (let i = 0; i < count; i++) g.particles.push({ x, y, vx: (Math.random() - .5) * 230, vy: -50 - Math.random() * 190, life: .35 + Math.random() * .5, color, size: 2 + Math.random() * 5 });
+    let mission = 1;
+    let kills = 0;
+    let spawned = 0;
+    let health = 100;
+    let score = 0;
+    let yaw = 0;
+    let pitch = 0;
+    let fireCooldown = 0;
+    let damageFlash = 0;
+    let won = false;
+
+    const hemi = new THREE.HemisphereLight(0xdfefff, 0x1a1030, 2.2); scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xffffff, 3.2); sun.position.set(-8, 16, 7); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); scene.add(sun);
+    const muzzle = new THREE.PointLight(0x7de8ff, 0, 18); scene.add(muzzle);
+
+    const gun = new THREE.Group();
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(.28, .16, .7), new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: .38, metalness: .75 }));
+    const gunGlow = new THREE.Mesh(new THREE.BoxGeometry(.29, .03, .5), new THREE.MeshBasicMaterial({ color: 0x22d3ee }));
+    gunGlow.position.y = .09; gun.add(gunBody, gunGlow); gun.position.set(.42, -.34, -.72); camera.add(gun); scene.add(camera);
+
+    const makeMaterial = (color: number, emissive = 0x000000, roughness = .65, metalness = .08) => new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity: emissive ? .25 : 0, roughness, metalness });
+
+    const buildMission = (index: number) => {
+      world.clear(); enemies.length = 0; bolts.length = 0; particles.length = 0;
+      const m = MISSIONS[index - 1];
+      scene.background = new THREE.Color(m.fog);
+      scene.fog = new THREE.Fog(m.fog, 16, 130);
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), makeMaterial(m.ground));
+      ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; world.add(ground);
+
+      const grid = new THREE.GridHelper(240, 48, m.accent, 0x334155);
+      (grid.material as THREE.Material).transparent = true; (grid.material as THREE.Material).opacity = .16; world.add(grid);
+
+      for (let i = 0; i < 46; i++) {
+        const size = 2 + Math.random() * 8;
+        const b = new THREE.Mesh(new THREE.BoxGeometry(size, 4 + Math.random() * 18, size), makeMaterial(i % 4 === 0 ? 0x263247 : 0x151d2d, i % 5 === 0 ? m.accent : 0x000000, .8, .12));
+        const side = Math.random() > .5 ? 1 : -1;
+        b.position.set(side * (14 + Math.random() * 74), b.scale.y / 2, -Math.random() * 150 + 25);
+        b.castShadow = true; b.receiveShadow = true; world.add(b);
+      }
+
+      for (let i = 0; i < 90; i++) {
+        const star = new THREE.Mesh(new THREE.SphereGeometry(.08 + Math.random() * .08, 6, 6), new THREE.MeshBasicMaterial({ color: i % 3 ? 0xffffff : m.accent }));
+        star.position.set((Math.random() - .5) * 220, 18 + Math.random() * 80, -Math.random() * 160);
+        world.add(star);
+      }
+
+      const gate = new THREE.Mesh(new THREE.TorusGeometry(8, .25, 12, 80), new THREE.MeshBasicMaterial({ color: m.accent }));
+      gate.position.set(0, 7, -58); world.add(gate);
+      camera.position.set(0, 1.7, 8); yaw = 0; pitch = 0;
+      kills = 0; spawned = 0; health = 100; won = false;
+      setState({ state: "briefing", mission: index, kills: 0, health: 100, score });
     };
-    const hit = (ax: number, ay: number, bx: number, by: number, rx = 20, ry = 25) => Math.abs(ax - bx) < rx && Math.abs(ay - by) < ry;
 
-    const damagePlayer = (g: Game) => {
-      g.player.lives--; g.player.invincible = 1.5; g.player.vy = -235; g.shake = .28;
-      burst(g, g.player.x, g.player.y - 30, "#ff3d81", 14);
-    };
-
-    const spawnEnemy = (g: Game, level: Level) => {
+    const spawnEnemy = () => {
+      const m = MISSIONS[mission - 1];
       const roll = Math.random();
-      const kind: EnemyKind = g.level === TOTAL_LEVELS && level.boss && g.kills >= level.goal - 4 && !g.enemies.some(e => e.kind === "boss")
-        ? "boss"
-        : roll < level.turrets ? "turret" : roll < level.turrets + level.heavy ? "heavy" : "scout";
-      const hp = kind === "boss" ? 10 : kind === "heavy" ? 3 : kind === "turret" ? 2 : 1;
-      const fromRight = Math.random() > .14;
-      const speed = (kind === "heavy" ? 38 : kind === "turret" ? 0 : kind === "boss" ? 28 : 72) * level.speed + Math.random() * 16;
-      g.enemies.push({ id: g.nextId++, x: fromRight ? W + 40 : -40, y: FLOOR, hp, maxHp: hp, speed, shot: .6 + Math.random() * 1.1, kind, hit: 0, phase: Math.random() * 10 });
+      const kind: Enemy["kind"] = mission >= 3 && roll < .18 ? "drone" : mission >= 2 && roll < .32 ? "heavy" : "grunt";
+      const g = new THREE.Group();
+      const color = kind === "heavy" ? 0xef476f : kind === "drone" ? 0xc77dff : 0x06d6a0;
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(.55, kind === "heavy" ? 1.3 : .95, 4, 10), makeMaterial(color, color, .5, .18)); body.castShadow = true; body.position.y = kind === "drone" ? 2.1 : 1.05; g.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(.28, 12, 12), makeMaterial(0xf8fafc)); head.position.y = kind === "drone" ? 2.82 : 1.98; head.castShadow = true; g.add(head);
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(.42, .09, .08), new THREE.MeshBasicMaterial({ color: m.accent })); visor.position.set(0, kind === "drone" ? 2.82 : 1.98, -.22); g.add(visor);
+      const gunMesh = new THREE.Mesh(new THREE.BoxGeometry(.9, .12, .12), makeMaterial(0x111827, 0x000000, .32, .8)); gunMesh.position.set(.36, kind === "drone" ? 2.12 : 1.24, -.2); g.add(gunMesh);
+      g.position.set((Math.random() - .5) * 28, 0, -24 - Math.random() * 32);
+      world.add(g); enemies.push({ mesh: g, hp: kind === "heavy" ? 3 : kind === "drone" ? 2 : 1, speed: (kind === "heavy" ? 1.8 : kind === "drone" ? 2.8 : 2.4) * m.speed, cooldown: .6 + Math.random() * 1.4, kind });
+      spawned++;
     };
 
-    const update = (g: Game, dt: number) => {
-      const level = LEVELS[g.level - 1];
-      const p = g.player;
-      g.time += dt;
-      const move = Number(held.current.has("right")) - Number(held.current.has("left"));
-      if (move) p.facing = move as 1 | -1;
-      p.x = Math.max(34, Math.min(W - 34, p.x + move * 245 * dt));
-      if (held.current.has("jump") && p.y >= FLOOR) p.vy = -430;
-      p.vy += 980 * dt;
-      p.y = Math.min(FLOOR, p.y + p.vy * dt);
-      if (p.y === FLOOR) p.vy = 0;
-      p.cooldown -= dt; p.invincible -= dt; g.shake = Math.max(0, g.shake - dt);
-
-      if (held.current.has("fire") && p.cooldown <= 0) {
-        const spread = g.level >= 3 ? [0, -.08, .08] : [0];
-        for (const angle of spread) g.shots.push({ x: p.x + p.facing * 30, y: p.y - 34, vx: p.facing * 590, vy: angle * 520, hostile: false, spread: angle });
-        p.cooldown = .12;
+    const burst = (position: THREE.Vector3, color: number, count = 10) => {
+      for (let i = 0; i < count; i++) {
+        const p = new THREE.Mesh(new THREE.SphereGeometry(.05 + Math.random() * .08, 6, 6), new THREE.MeshBasicMaterial({ color }));
+        p.position.copy(position);
+        world.add(p);
+        particles.push({ mesh: p, velocity: new THREE.Vector3((Math.random() - .5) * 5, Math.random() * 4, (Math.random() - .5) * 5), life: .5 + Math.random() * .4 });
       }
+    };
 
-      g.spawn -= dt;
-      if (g.kills + g.enemies.length < level.goal && g.spawn <= 0 && g.enemies.length < level.maxEnemies) {
-        spawnEnemy(g, level);
-        g.spawn = level.spawn + Math.random() * .38;
-      }
+    const shoot = () => {
+      if (fireCooldown > 0 || hudRef.current.state !== "playing") return;
+      fireCooldown = .16;
+      muzzle.intensity = 6;
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(.07, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7de8ff }));
+      const origin = new THREE.Vector3(); camera.getWorldPosition(origin);
+      const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+      mesh.position.copy(origin.clone().add(dir.clone().multiplyScalar(.9)));
+      world.add(mesh); bolts.push({ mesh, velocity: dir.multiplyScalar(34), hostile: false, life: 1.6 });
+    };
 
-      for (const enemy of g.enemies) {
-        const direction = Math.sign(p.x - enemy.x) || 1;
-        const desired = enemy.kind === "boss" ? 300 : enemy.kind === "heavy" ? 235 : enemy.kind === "turret" ? 390 : 150;
-        if (enemy.kind !== "turret" && Math.abs(p.x - enemy.x) > desired) enemy.x += direction * enemy.speed * dt;
-        if (enemy.kind === "boss") enemy.y = FLOOR - 18 + Math.sin(g.time * 2 + enemy.phase) * 18;
-        enemy.shot -= dt; enemy.hit -= dt;
-        if (enemy.shot <= 0 && Math.abs(p.x - enemy.x) < 560) {
-          const dx = p.x - enemy.x, dy = p.y - 34 - (enemy.y - 40), length = Math.hypot(dx, dy) || 1;
-          const speed = enemy.kind === "boss" ? 275 : enemy.kind === "heavy" ? 250 : enemy.kind === "turret" ? 260 : 215;
-          g.shots.push({ x: enemy.x + direction * 23, y: enemy.y - 40, vx: dx / length * speed, vy: dy / length * speed, hostile: true, spread: 0 });
-          if (enemy.kind === "boss") {
-            g.shots.push({ x: enemy.x, y: enemy.y - 40, vx: -speed, vy: -70, hostile: true, spread: 0 });
-            g.shots.push({ x: enemy.x, y: enemy.y - 40, vx: -speed, vy: 70, hostile: true, spread: 0 });
-          }
-          enemy.shot = (enemy.kind === "boss" ? .48 : enemy.kind === "heavy" ? .9 : enemy.kind === "turret" ? 1.05 : 1.45) + Math.random() * .65;
+    const enemyShoot = (enemy: Enemy) => {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(.08, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff477e }));
+      const start = enemy.mesh.position.clone().add(new THREE.Vector3(0, enemy.kind === "drone" ? 2.2 : 1.35, 0));
+      const target = camera.position.clone().add(new THREE.Vector3(0, -.15, 0));
+      mesh.position.copy(start);
+      world.add(mesh); bolts.push({ mesh, velocity: target.sub(start).normalize().multiplyScalar(15), hostile: true, life: 2.4 });
+    };
+
+    buildMission(1);
+
+    const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); };
+    window.addEventListener("resize", onResize);
+
+    const onLook = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" && e.clientX < window.innerWidth * .45) return;
+      input.current.lookX += e.movementX * .0024;
+      input.current.lookY += e.movementY * .0024;
+    };
+    window.addEventListener("pointermove", onLook);
+
+    let raf = 0;
+    const animate = () => {
+      raf = requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), .033);
+      const st = hudRef.current.state;
+      const m = MISSIONS[mission - 1];
+      yaw -= input.current.lookX; pitch -= input.current.lookY; pitch = Math.max(-1.2, Math.min(1.2, pitch));
+      input.current.lookX = 0; input.current.lookY = 0;
+      camera.rotation.set(pitch, yaw, 0, "YXZ");
+
+      if (st === "playing") {
+        const move = new THREE.Vector3(input.current.strafe, 0, -input.current.forward).normalize().multiplyScalar(7 * dt);
+        move.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        camera.position.add(move);
+        camera.position.x = Math.max(-22, Math.min(22, camera.position.x));
+        camera.position.z = Math.max(-70, Math.min(10, camera.position.z));
+        camera.position.y = 1.7 + Math.sin(clock.elapsedTime * 10) * .015;
+
+        if (spawned < m.enemies && enemies.length < Math.min(6, 3 + mission)) spawnEnemy();
+        if (input.current.firing) shoot();
+        fireCooldown = Math.max(0, fireCooldown - dt);
+        damageFlash = Math.max(0, damageFlash - dt);
+        muzzle.intensity = Math.max(0, muzzle.intensity - 30 * dt);
+
+        for (const enemy of enemies) {
+          const toPlayer = camera.position.clone().sub(enemy.mesh.position);
+          const dist = toPlayer.length();
+          enemy.mesh.lookAt(camera.position.x, enemy.mesh.position.y + 1, camera.position.z);
+          if (dist > (enemy.kind === "drone" ? 11 : 8)) enemy.mesh.position.add(toPlayer.normalize().multiplyScalar(enemy.speed * dt));
+          if (enemy.kind === "drone") enemy.mesh.position.y = 1.1 + Math.sin(clock.elapsedTime * 3 + enemy.mesh.id) * .35;
+          enemy.cooldown -= dt;
+          if (enemy.cooldown <= 0 && dist < 34) { enemyShoot(enemy); enemy.cooldown = (enemy.kind === "heavy" ? .9 : 1.35) + Math.random() * .6; }
         }
-        if (hit(p.x, p.y - 25, enemy.x, enemy.y - 27, enemy.kind === "boss" ? 34 : 25, 36) && p.invincible <= 0) damagePlayer(g);
-      }
 
-      for (const shot of g.shots) {
-        shot.x += shot.vx * dt; shot.y += shot.vy * dt;
-        if (shot.hostile && hit(p.x, p.y - 31, shot.x, shot.y, 16, 25) && p.invincible <= 0) { damagePlayer(g); shot.x = -999; }
-        if (!shot.hostile) {
-          const target = g.enemies.find(e => e.hp > 0 && hit(e.x, e.y - 32, shot.x, shot.y, e.kind === "boss" ? 34 : e.kind === "heavy" ? 27 : e.kind === "turret" ? 24 : 20, 32));
-          if (target) {
-            target.hp--; target.hit = .1; shot.x = 9999;
-            burst(g, target.x, target.y - 36, "#ffe066", 5);
-            if (target.hp <= 0) {
-              g.kills++;
-              g.score += target.kind === "boss" ? 2500 : target.kind === "heavy" ? 350 : target.kind === "turret" ? 250 : 100;
-              burst(g, target.x, target.y - 32, target.kind === "boss" ? "#7c3aed" : "#ff477e", target.kind === "boss" ? 26 : 15);
-              g.shake = target.kind === "boss" ? .34 : .14;
+        for (const bolt of bolts) {
+          bolt.mesh.position.add(bolt.velocity.clone().multiplyScalar(dt));
+          bolt.life -= dt;
+          if (!bolt.hostile) {
+            ray.set(bolt.mesh.position, bolt.velocity.clone().normalize());
+            for (const enemy of enemies) {
+              if (bolt.mesh.position.distanceTo(enemy.mesh.position.clone().add(new THREE.Vector3(0, enemy.kind === "drone" ? 2.2 : 1.3, 0))) < 1) {
+                enemy.hp--; bolt.life = 0;
+                burst(bolt.mesh.position, m.accent, 7);
+                if (enemy.hp <= 0) {
+                  burst(enemy.mesh.position.clone().add(new THREE.Vector3(0, 1.2, 0)), enemy.kind === "heavy" ? 0xef476f : 0x06d6a0, 16);
+                  world.remove(enemy.mesh);
+                  enemies.splice(enemies.indexOf(enemy), 1);
+                  kills++; score += enemy.kind === "heavy" ? 300 : enemy.kind === "drone" ? 250 : 100;
+                  setState({ kills, score });
+                }
+                break;
+              }
             }
+          } else if (bolt.mesh.position.distanceTo(camera.position) < .8) {
+            bolt.life = 0; health -= enemyDamage(mission); damageFlash = .2;
+            setState({ health });
+            if (health <= 0) { setState({ state: "lost" }); music.current.stop(); }
           }
         }
+        for (let i = bolts.length - 1; i >= 0; i--) if (bolts[i].life <= 0) { world.remove(bolts[i].mesh); bolts.splice(i, 1); }
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i]; p.mesh.position.add(p.velocity.clone().multiplyScalar(dt)); p.velocity.y -= 8 * dt; p.life -= dt;
+          (p.mesh.material as THREE.MeshBasicMaterial).transparent = true; (p.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, p.life * 2);
+          if (p.life <= 0) { world.remove(p.mesh); particles.splice(i, 1); }
+        }
+        if (!won && kills >= m.enemies && enemies.length === 0) {
+          won = true;
+          score += 1000;
+          if (mission >= MISSIONS.length) { setState({ state: "won", score }); music.current.stop(); }
+          else setState({ state: "clear", score });
+        }
       }
-      g.enemies = g.enemies.filter(e => e.hp > 0 && e.x > -90 && e.x < W + 90);
-      g.shots = g.shots.filter(s => s.x > -60 && s.x < W + 60 && s.y > -40 && s.y < H + 30);
-      for (const particle of g.particles) { particle.x += particle.vx * dt; particle.y += particle.vy * dt; particle.vy += 470 * dt; particle.life -= dt; }
-      g.particles = g.particles.filter(particle => particle.life > 0);
-
-      if (p.lives <= 0) { g.state = "lost"; musicRef.current.stop(); }
-      if (g.kills >= level.goal && g.enemies.length === 0) {
-        g.score += 1200;
-        g.state = g.level >= TOTAL_LEVELS ? "won" : "levelclear";
-        if (g.state === "won") musicRef.current.stop();
-      }
+      renderer.render(scene, camera);
     };
+    animate();
 
-    const loop = (now: number) => {
-      const dt = Math.min((now - last) / 1000, .034); last = now;
-      const g = gameRef.current;
-      if (g.state === "playing") {
-        update(g, dt); hudClock += dt;
-        if (hudClock > .08 || g.state !== "playing") { publish(); hudClock = 0; }
-      }
-      draw(ctx, g, now);
-      animation = requestAnimationFrame(loop);
+    const api = {
+      start() { music.current.start(); setState({ state: "playing" }); },
+      next() { mission++; score += 500; buildMission(mission); music.current.start(); setState({ state: "playing", mission, kills: 0, health: 100, score }); },
+      reset() { mission = 1; score = 0; buildMission(1); setState({ state: "briefing", mission: 1, kills: 0, health: 100, score: 0 }); },
+      input,
     };
-    animation = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animation);
-  }, [publish]);
+    (window as unknown as { cobra3d?: typeof api }).cobra3d = api;
 
-  const level = LEVELS[hud.level - 1];
-  const progress = Math.min(100, hud.kills / level.goal * 100);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("pointermove", onLook);
+      mount.removeChild(renderer.domElement);
+      renderer.dispose();
+    };
+  }, [setState]);
+
+  const begin = () => (window as unknown as { cobra3d?: { start(): void } }).cobra3d?.start();
+  const next = () => (window as unknown as { cobra3d?: { next(): void } }).cobra3d?.next();
+  const reset = () => (window as unknown as { cobra3d?: { reset(): void } }).cobra3d?.reset();
+  const setMove = (forward: number, strafe: number) => { input.current.forward = forward; input.current.strafe = strafe; };
+  const setFire = (v: boolean) => { input.current.firing = v; };
+
   return (
-    <main className="game-shell">
-      <section className="game-card" aria-label="Cobra Strike game">
-        <canvas ref={canvasRef} width={W} height={H} />
-        <header className="hud">
-          <div className="identity"><small>OPERATIVE</small><strong>COBRA</strong><b>{Array.from({ length: Math.max(0, hud.lives) }, (_, i) => <i key={i} />)}</b></div>
-          <div className="mission"><small>LEVEL {hud.level} · {level.name}</small><strong>{hud.kills}<em>/ {level.goal}</em></strong><span><i style={{ width: `${progress}%` }} /></span></div>
-          <div className="score"><small>COMBAT SCORE</small><strong>{String(hud.score).padStart(6, "0")}</strong></div>
-        </header>
+    <main className="game3d-shell">
+      <div ref={mountRef} className="game3d-viewport" />
+      <div className="crosshair">+</div>
+      <header className="hud3d">
+        <div><small>MISSION {hud.mission}</small><strong>{MISSIONS[hud.mission - 1].name}</strong></div>
+        <div><small>KILLS</small><strong>{hud.kills}/{MISSIONS[hud.mission - 1].enemies}</strong></div>
+        <div><small>HEALTH</small><strong>{hud.health}</strong></div>
+        <div><small>SCORE</small><strong>{String(hud.score).padStart(6, "0")}</strong></div>
+      </header>
 
-        {hud.state === "briefing" && <div className="briefing">
-          <div className="mission-tag">LEVEL {hud.level} · {level.name}</div>
-          <p>PRIMARY OBJECTIVE</p><h1>{level.subtitle.toUpperCase()}</h1>
-          <div className="goal-card"><b>{level.goal}</b><span>HOSTILES<br />TO ELIMINATE</span></div>
-          <p className="orders">Smooth run-and-gun controls. Heavy armor takes three hits. Spread fire unlocks in later levels.</p>
-          <button onClick={start}>DEPLOY <span>›</span></button>
-        </div>}
+      {hud.state === "briefing" && <section className="overlay3d">
+        <small>OPERATION {hud.mission}</small>
+        <h1>{MISSIONS[hud.mission - 1].name}</h1>
+        <p>{MISSIONS[hud.mission - 1].objective}</p>
+        <button onClick={begin}>DEPLOY</button>
+      </section>}
 
-        {hud.state === "levelclear" && <div className="result levelclear">
-          <p>LEVEL CLEAR</p><h1>{level.name}</h1>
-          <strong>{String(hud.score).padStart(6, "0")} <small>PTS</small></strong>
-          <button onClick={next}>NEXT LEVEL</button>
-        </div>}
+      {hud.state === "clear" && <section className="overlay3d">
+        <small>MISSION CLEAR</small>
+        <h1>{MISSIONS[hud.mission - 1].name}</h1>
+        <p>Score {String(hud.score).padStart(6, "0")}</p>
+        <button onClick={next}>NEXT MISSION</button>
+      </section>}
 
-        {(hud.state === "won" || hud.state === "lost") && <div className={`result ${hud.state}`}>
-          <p>{hud.state === "won" ? "CAMPAIGN COMPLETE" : "OPERATIVE DOWN"}</p>
-          <h1>{hud.state === "won" ? "CORE DESTROYED" : "THE OUTPOST HOLDS"}</h1>
-          <strong>{String(hud.score).padStart(6, "0")} <small>PTS</small></strong>
-          <button onClick={reset}>{hud.state === "won" ? "PLAY AGAIN" : "REDEPLOY"}</button>
-        </div>}
+      {(hud.state === "won" || hud.state === "lost") && <section className="overlay3d">
+        <small>{hud.state === "won" ? "CAMPAIGN COMPLETE" : "OPERATIVE DOWN"}</small>
+        <h1>{hud.state === "won" ? "CORE DESTROYED" : "MISSION FAILED"}</h1>
+        <p>Final score {String(hud.score).padStart(6, "0")}</p>
+        <button onClick={reset}>RESTART</button>
+      </section>}
 
-        <div className="controls" aria-label="Touch controls">
-          <div className="dpad"><button aria-label="Move left" onPointerDown={press("left")} onPointerUp={release("left")} onPointerCancel={release("left")}>◀</button><button aria-label="Move right" onPointerDown={press("right")} onPointerUp={release("right")} onPointerCancel={release("right")}>▶</button></div>
-          <div className="actions"><button className="jump" onPointerDown={press("jump")} onPointerUp={release("jump")} onPointerCancel={release("jump")}><b>↑</b><span>JUMP</span></button><button className="fire" onPointerDown={press("fire")} onPointerUp={release("fire")} onPointerCancel={release("fire")}><b>✦</b><span>FIRE</span></button></div>
+      <div className="touch3d">
+        <div className="movepad">
+          <button onPointerDown={() => setMove(1, 0)} onPointerUp={() => setMove(0, 0)}>▲</button>
+          <div><button onPointerDown={() => setMove(0, -1)} onPointerUp={() => setMove(0, 0)}>◀</button><button onPointerDown={() => setMove(-1, 0)} onPointerUp={() => setMove(0, 0)}>▼</button><button onPointerDown={() => setMove(0, 1)} onPointerUp={() => setMove(0, 0)}>▶</button></div>
         </div>
-      </section>
-      <aside className="rotate"><span>↻</span><b>ROTATE TO LANDSCAPE</b><small>Cobra Strike is built for iPhone</small></aside>
+        <button className="fire3d" onPointerDown={() => setFire(true)} onPointerUp={() => setFire(false)} onPointerCancel={() => setFire(false)}>FIRE</button>
+      </div>
     </main>
   );
 }
 
-function draw(ctx: CanvasRenderingContext2D, g: Game, now: number) {
-  const level = LEVELS[g.level - 1];
-  ctx.save();
-  if (g.shake > 0) ctx.translate((Math.random() - .5) * 9, (Math.random() - .5) * 7);
-  const t = now * .001;
-  const sky = ctx.createLinearGradient(0, 0, 0, FLOOR);
-  sky.addColorStop(0, level.sky[0]); sky.addColorStop(.5, level.sky[1]); sky.addColorStop(1, level.sky[2]);
-  ctx.fillStyle = sky; ctx.fillRect(-12, -12, W + 24, H + 24);
-
-  ctx.fillStyle = "rgba(255,255,255,.9)";
-  for (let i = 0; i < 34; i++) { const y = 14 + (i * 37) % 190; ctx.fillRect((i * 89 + t * 7) % W, y, i % 3 === 0 ? 2 : 1, i % 4 === 0 ? 2 : 1); }
-
-  const sunGlow = ctx.createRadialGradient(686, 96, 8, 686, 96, 92);
-  sunGlow.addColorStop(0, level.sun); sunGlow.addColorStop(.35, level.accent); sunGlow.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = sunGlow; ctx.beginPath(); ctx.arc(686, 96, 92, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = level.sun; ctx.beginPath(); ctx.arc(686, 96, 38, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = level.sky[2]; for (let y = 104; y < 144; y += 9) ctx.fillRect(640, y, 92, 4);
-
-  ridge(ctx, level.far, 0.12, 205, 64, t);
-  ridge(ctx, level.near, 0.24, 244, 92, t);
-
-  ctx.strokeStyle = "rgba(255,255,255,.1)"; ctx.lineWidth = 1;
-  for (let x = -120 + (t * 70) % 120; x < W + 120; x += 120) { ctx.beginPath(); ctx.moveTo(x, FLOOR); ctx.lineTo(x + 80, 178); ctx.stroke(); }
-
-  const ground = ctx.createLinearGradient(0, FLOOR, 0, H);
-  ground.addColorStop(0, level.ground); ground.addColorStop(1, "#05070d");
-  ctx.fillStyle = ground; ctx.fillRect(0, FLOOR, W, H - FLOOR);
-  ctx.fillStyle = level.accent; ctx.shadowColor = level.accent; ctx.shadowBlur = 12; ctx.fillRect(0, FLOOR, W, 3); ctx.shadowBlur = 0;
-  ctx.fillStyle = "rgba(255,255,255,.08)"; for (let x = -60 + (t * 170) % 76; x < W; x += 76) ctx.fillRect(x, 344, 40, 4);
-  ctx.fillStyle = "rgba(0,0,0,.28)"; for (let x = 0; x < W; x += 42) ctx.fillRect(x, 356 + (x % 4) * 4, 24, 5);
-
-  for (const shot of g.shots) {
-    ctx.fillStyle = shot.hostile ? "#ff477e" : "#fff06a";
-    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
-    ctx.fillRect(shot.x - 9, shot.y - 2, 18, shot.hostile ? 4 : 5);
-    ctx.shadowBlur = 0;
-  }
-  for (const enemy of g.enemies) soldier(ctx, enemy, false);
-  const flicker = g.player.invincible > 0 && Math.floor(now / 70) % 2 === 0;
-  if (!flicker) {
-    soldier(ctx, { id: 0, x: g.player.x, y: g.player.y, hp: 1, maxHp: 1, speed: 0, shot: 0, kind: "scout", hit: 0, phase: 0 }, true, g.player.facing);
-  }
-  for (const p of g.particles) {
-    ctx.globalAlpha = Math.min(1, p.life * 3);
-    ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 8;
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-  }
-  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-  ctx.restore();
-}
-
-function ridge(ctx: CanvasRenderingContext2D, color: string, speed: number, base: number, amp: number, t: number) {
-  ctx.fillStyle = color;
-  ctx.beginPath(); ctx.moveTo(0, FLOOR);
-  for (let x = 0; x <= W + 20; x += 36) {
-    const y = base - Math.abs(Math.sin((x * .018) + t * speed)) * amp - Math.sin((x * .041) + t * speed * 1.7) * 18;
-    ctx.lineTo(x, y);
-  }
-  ctx.lineTo(W, FLOOR); ctx.closePath(); ctx.fill();
-}
-
-function soldier(ctx: CanvasRenderingContext2D, enemy: Enemy, hero: boolean, facing: 1 | -1 = enemy.x < W / 2 ? 1 : -1) {
-  const heavy = enemy.kind === "heavy" || enemy.kind === "boss";
-  const turret = enemy.kind === "turret";
-  const boss = enemy.kind === "boss";
-  const x = enemy.x, y = enemy.y;
-  ctx.save(); ctx.translate(x, y); ctx.scale(facing, 1);
-  ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.beginPath(); ctx.ellipse(0, 5, boss ? 34 : heavy ? 27 : 22, 6, 0, 0, Math.PI * 2); ctx.fill();
-  if (turret) {
-    ctx.fillStyle = enemy.hit > 0 ? "#fff" : "#26324a"; ctx.fillRect(-18, -30, 36, 30);
-    ctx.fillStyle = "#10b5e9"; ctx.fillRect(-10, -38, 20, 10);
-    ctx.fillStyle = "#f8fafc"; ctx.fillRect(9, -34, 26, 5);
-    ctx.fillStyle = "#ff477e"; ctx.fillRect(30, -35, 6, 7);
-    ctx.restore(); return;
-  }
-  const suit = enemy.hit > 0 ? "#ffffff" : hero ? "#ffd166" : boss ? "#7c3aed" : heavy ? "#ef476f" : "#06d6a0";
-  const trim = hero ? "#118ab2" : boss ? "#f72585" : heavy ? "#ffd166" : "#ff8fab";
-  ctx.fillStyle = suit; ctx.fillRect(-11, -45, heavy ? 25 : 21, 30);
-  ctx.fillStyle = "rgba(255,255,255,.28)"; ctx.fillRect(-11, -45, 5, 30);
-  ctx.fillStyle = trim; ctx.fillRect(-11, -32, heavy ? 25 : 21, 4);
-  ctx.fillStyle = suit; ctx.fillRect(-10, -15, 8, 19); ctx.fillRect(5, -15, 8, 19);
-  ctx.fillStyle = hero ? "#ffcf9f" : "#b47e64"; ctx.fillRect(-8, -60, 17, 16);
-  ctx.fillStyle = hero ? "#ef476f" : boss ? "#111827" : "#27324a"; ctx.fillRect(-11, -63, 22, 7);
-  ctx.fillStyle = trim; ctx.fillRect(7, -56, 9, 4);
-  ctx.fillStyle = "#e5e7eb"; ctx.fillRect(8, -41, heavy ? 32 : 28, 6);
-  ctx.fillStyle = "#111827"; ctx.fillRect(31, -38, heavy ? 13 : 9, 3);
-  if (heavy) { ctx.fillStyle = trim; ctx.fillRect(-15, -49, 31, 7); }
-  if (boss) {
-    ctx.strokeStyle = "#f72585"; ctx.lineWidth = 3; ctx.strokeRect(-18, -66, 38, 56);
-    ctx.fillStyle = "#f72585"; ctx.fillRect(-4, -73, 8, 8);
-  }
-  ctx.restore();
-}
+function enemyDamage(mission: number) { return 6 + mission * 2; }
 
 export default App;
