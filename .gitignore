@@ -1,0 +1,12 @@
+# Node
+node_modules/
+dist/
+
+# Capacitor
+android/
+
+# Logs
+*.log
+
+# Build artifacts
+*.zip
